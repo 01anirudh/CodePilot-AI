@@ -1,0 +1,101 @@
+.dashboard { max-width: 1400px; }
+
+/* Hero */
+.dashboard-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 2rem;
+  gap: 1rem;
+}
+
+.hero-text h1 { font-size: 2rem; margin-bottom: 0.375rem; }
+.hero-subtitle { color: var(--text-secondary); font-size: 1rem; }
+.hero-actions { display: flex; gap: 0.75rem; flex-shrink: 0; }
+.text-muted { color: var(--text-muted); font-size: 0.875rem; }
+
+/* Card headers */
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+}
+.card-header-row h3 { font-size: 1rem; font-weight: 700; }
+.card-header-row p { color: var(--text-muted); font-size: 0.8125rem; margin-top: 0.125rem; }
+
+/* Main grid */
+.dashboard-main-grid {
+  display: grid;
+  grid-template-columns: 1.4fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+@media (max-width: 1000px) {
+  .dashboard-main-grid { grid-template-columns: 1fr; }
+}
+
+/* Chart */
+.chart-card { }
+.chart-legend {
+  display: flex;
+  gap: 1.5rem;
+  margin-top: 0.75rem;
+}
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--text-secondary);
+}
+.legend-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+}
+
+/* Recent list */
+.recent-list { display: flex; flex-direction: column; gap: 0; }
+.recent-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.875rem 0;
+  border-bottom: 1px solid rgba(42,42,66,0.4);
+  gap: 1rem;
+}
+.recent-item:last-child { border-bottom: none; }
+.recent-item-info { flex: 1; display: flex; flex-direction: column; gap: 0.25rem; }
+.recent-task { font-size: 0.875rem; font-weight: 500; color: var(--text-primary); }
+.recent-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.recent-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 48px;
+}
+.recent-score span:first-child {
+  font-size: 1.25rem;
+  font-weight: 800;
+  color: var(--brand-400);
+  line-height: 1;
+}
+.score-label { font-size: 0.625rem; color: var(--text-muted); }
+
+/* Pipeline showcase */
+.pipeline-showcase { }
+.pipeline-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--bg-border);
+}

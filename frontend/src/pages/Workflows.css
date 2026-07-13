@@ -1,0 +1,101 @@
+.workflow-modal { max-width: 600px; }
+
+.workflow-type-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+}
+
+.type-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  padding: 0.75rem;
+  background: var(--bg-card-2);
+  border: 1px solid var(--bg-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  font-family: inherit;
+  text-align: left;
+}
+.type-option:hover { border-color: var(--brand-500); background: var(--bg-hover); }
+.type-option.selected { border-color: var(--brand-500); background: rgba(99,102,241,0.1); }
+.type-label { font-size: 0.875rem; font-weight: 600; color: var(--text-primary); }
+.type-desc { font-size: 0.75rem; color: var(--text-muted); }
+
+/* Workflow List */
+.workflow-list { display: flex; flex-direction: column; gap: 1rem; }
+
+.workflow-card { padding: 0; overflow: hidden; }
+.workflow-card.expanded { border-color: rgba(99,102,241,0.3); }
+
+.workflow-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.25rem 1.5rem;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.workflow-card-header:hover { background: rgba(255,255,255,0.02); }
+
+.wf-header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+  flex: 1;
+  min-width: 0;
+}
+.wf-task { font-size: 0.9375rem; font-weight: 600; color: var(--text-primary); margin-bottom: 0.125rem; }
+.wf-meta { font-size: 0.75rem; color: var(--text-muted); }
+
+.workflow-card-body { padding: 0 1.5rem 1.5rem; }
+
+/* Plan */
+.wf-plan-box {
+  background: var(--bg-card-2);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  margin-top: 1rem;
+}
+.wf-plan-box h4 { margin-bottom: 0.375rem; font-size: 0.875rem; }
+.plan-step {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8125rem;
+  padding: 0.25rem 0;
+}
+.step-num {
+  width: 20px; height: 20px;
+  background: var(--bg-border);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.625rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.step-agent { color: var(--brand-400); font-weight: 600; font-family: monospace; }
+.step-action { color: var(--text-secondary); }
+
+/* Approval */
+.approval-section {
+  margin-top: 1rem;
+  padding: 1.25rem;
+  background: rgba(245,158,11,0.05);
+  border: 1px solid rgba(245,158,11,0.2);
+  border-radius: var(--radius-md);
+}
+.approval-header { margin-bottom: 1rem; }
+.approval-header h4 { margin-bottom: 0.25rem; }
+.approval-actions { display: flex; gap: 0.75rem; justify-content: flex-end; }
+
+.loading-placeholder {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 3rem;
+}
