@@ -49,18 +49,18 @@ async def run_analyzer_agent(
     # Build context
     file_paths = [item["path"] for item in tree if item.get("type") == "blob"]
     context = f"""
-Repository: {repo_data.get('full_name', 'unknown')}
-Description: {repo_data.get('description', 'N/A')}
-Primary Language: {repo_data.get('language', 'Unknown')}
-Stars: {repo_data.get('stargazers_count', 0)}
-Default Branch: {repo_data.get('default_branch', 'main')}
+        Repository: {repo_data.get('full_name', 'unknown')}
+        Description: {repo_data.get('description', 'N/A')}
+        Primary Language: {repo_data.get('language', 'Unknown')}
+        Stars: {repo_data.get('stargazers_count', 0)}
+        Default Branch: {repo_data.get('default_branch', 'main')}
 
-File Tree (first 200 files):
-{chr(10).join(file_paths[:200])}
+        File Tree (first 200 files):
+        {chr(10).join(file_paths[:200])}
 
-README (first 2000 chars):
-{readme[:2000]}
-"""
+        README (first 2000 chars):
+        {readme[:2000]}
+        """
 
     messages = [
         SystemMessage(content=SYSTEM_PROMPT),

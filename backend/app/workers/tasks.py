@@ -97,7 +97,8 @@ def analyze_repository(
                 raise
             finally:
                 from app.database import engine
-                await engine.dispose()
+                if getattr(engine, 'name', '') == 'postgresql':
+                    await engine.dispose()
 
     return run_async(_run())
 
@@ -180,11 +181,59 @@ def run_workflow(
 
                 config = {"configurable": {"thread_id": workflow_id}}
 
+                node_status_map = {
+                    "analyzer": WorkflowStatus.ANALYZING,
+                    "planner": WorkflowStatus.PLANNING,
+                    "codegen": WorkflowStatus.CODING,
+                    "refactor": WorkflowStatus.CODING,
+                    "testing": WorkflowStatus.TESTING,
+                    "reviewer": WorkflowStatus.REVIEWING,
+                    "docs": WorkflowStatus.REVIEWING,
+                    "human_approval": WorkflowStatus.WAITING_FOR_APPROVAL,
+                }
+
                 # Run graph until human approval interrupt
-                final_state = None
+                final_state = initial_state
+                workflow.current_agent = "analyzer"
+                workflow.status = WorkflowStatus.ANALYZING
+                await db.commit()
+
                 async for event in workflow_graph.astream(initial_state, config=config):
                     for node_name, node_output in event.items():
-                        final_state = node_output
+                        final_state = {**final_state, **(node_output if isinstance(node_output, dict) else {})}
+
+                        workflow.current_agent = node_name
+                        workflow.iteration = (workflow.iteration or 0) + 1
+
+                        if node_name in node_status_map:
+                            workflow.status = node_status_map[node_name]
+
+                        # Update plan if available
+                        if "plan" in final_state and final_state["plan"]:
+                            workflow.plan = final_state["plan"]
+
+                        # Update files_changed if codegen ran
+                        if "codegen_result" in final_state and isinstance(final_state["codegen_result"], dict):
+                            files = final_state["codegen_result"].get("files", [])
+                            if files:
+                                workflow.files_changed = files
+
+                        # Update errors
+                        if "errors" in final_state and final_state["errors"]:
+                            workflow.errors = final_state["errors"]
+
+                        # Update messages/logs
+                        if "logs" in final_state and final_state["logs"]:
+                            workflow.messages = final_state["logs"]
+
+                        # Update tool results
+                        new_tools = list(workflow.tool_results or [])
+                        new_tools.append({
+                            "agent": node_name,
+                            "timestamp": datetime.utcnow().isoformat(),
+                            "status": "completed" if not final_state.get("errors") else "warning"
+                        })
+                        workflow.tool_results = new_tools
 
                         # Create agent run record
                         agent_type_map = {
@@ -204,35 +253,125 @@ def run_workflow(
                                 workflow_id=uuid.UUID(workflow_id),
                                 agent_type=agent_type_map[node_name],
                                 status=AgentStatus.COMPLETED,
-                                output_data=node_output,
+                                output_data=node_output if isinstance(node_output, dict) else {},
                                 started_at=datetime.utcnow(),
                                 completed_at=datetime.utcnow(),
                             )
                             db.add(agent_run)
-                            await db.commit()
 
-                # Update workflow status
-                current_status = (final_state or {}).get("status", "running")
-                if current_status == "awaiting_approval":
-                    workflow.status = WorkflowStatus.AWAITING_APPROVAL
+                        await db.commit()
+
+                # Get the FULL accumulated state from the checkpointer
+                state_snapshot = workflow_graph.get_state(config)
+                full_state = state_snapshot.values if (state_snapshot and state_snapshot.values) else final_state
+
+                # Check if paused for human approval
+                if (state_snapshot and state_snapshot.next and "human_approval" in state_snapshot.next) or \
+                   full_state.get("status") == "awaiting_approval" or \
+                   (final_state.get("completed_steps") and "docs" in final_state.get("completed_steps") and not final_state.get("human_approved")):
+                    workflow.status = WorkflowStatus.WAITING_FOR_APPROVAL
+                    workflow.current_agent = "human_approval"
+                    full_state["status"] = "awaiting_approval"
                 else:
-                    workflow.status = WorkflowStatus.COMPLETED if not (final_state or {}).get("errors") else WorkflowStatus.FAILED
+                    has_errors = isinstance(full_state, dict) and bool(full_state.get("errors"))
+                    workflow.status = WorkflowStatus.FAILED if has_errors else WorkflowStatus.COMPLETED
+                    workflow.current_agent = "completed"
+                    workflow.completed_at = datetime.utcnow()
 
-                workflow.result = final_state
-                workflow.plan = (final_state or {}).get("plan")
-                workflow.completed_at = datetime.utcnow()
+                if not isinstance(full_state, dict):
+                    full_state = {}
+
+                workflow.result = full_state
+                if "plan" in full_state and full_state["plan"]:
+                    workflow.plan = full_state["plan"]
                 await db.commit()
 
                 return {
                     "status": workflow.status.value,
                     "workflow_id": workflow_id,
-                    "result": final_state,
+                    "result": full_state,
                 }
         finally:
             from app.database import engine
-            await engine.dispose()
+            if getattr(engine, 'name', '') == 'postgresql':
+                await engine.dispose()
 
     return run_async(_run())
+
+
+@celery_app.task(
+    name="app.workers.tasks.resume_workflow",
+    bind=True,
+    max_retries=1,
+)
+def resume_workflow(self, workflow_id: str):
+    """Celery task: resume a paused workflow after human approval."""
+    async def _run():
+        from app.database import AsyncSessionLocal
+        from app.models import Workflow, WorkflowStatus, AgentRun, AgentType, AgentStatus
+        from app.agents.graph import workflow_graph
+        from sqlalchemy import select
+        import uuid
+        from datetime import datetime
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Workflow).where(Workflow.id == uuid.UUID(workflow_id))
+            )
+            workflow = result.scalar_one_or_none()
+            if not workflow:
+                return {"error": "Workflow not found"}
+
+            workflow.status = WorkflowStatus.CODING
+            workflow.current_agent = "github"
+            await db.commit()
+
+            config = {"configurable": {"thread_id": workflow_id}}
+
+            # Restore state into the checkpointer if needed
+            current_state = workflow.result or {}
+            current_state["human_approved"] = True
+            try:
+                workflow_graph.update_state(config, {"human_approved": True})
+            except Exception:
+                pass
+
+            final_state = current_state
+            async for event in workflow_graph.astream(None, config=config):
+                for node_name, node_output in event.items():
+                    final_state = {**final_state, **(node_output if isinstance(node_output, dict) else {})}
+                    workflow.current_agent = node_name
+                    workflow.iteration = (workflow.iteration or 0) + 1
+
+                    if node_name == "github":
+                        agent_run = AgentRun(
+                            id=uuid.uuid4(),
+                            workflow_id=uuid.UUID(workflow_id),
+                            agent_type=AgentType.GITHUB,
+                            status=AgentStatus.COMPLETED,
+                            output_data=node_output if isinstance(node_output, dict) else {},
+                            started_at=datetime.utcnow(),
+                            completed_at=datetime.utcnow(),
+                        )
+                        db.add(agent_run)
+
+                    await db.commit()
+
+            state_snapshot = workflow_graph.get_state(config)
+            full_state = state_snapshot.values if (state_snapshot and state_snapshot.values) else final_state
+
+            has_errors = isinstance(full_state, dict) and bool(full_state.get("errors"))
+            workflow.status = WorkflowStatus.FAILED if has_errors else WorkflowStatus.COMPLETED
+            workflow.current_agent = "completed"
+            workflow.completed_at = datetime.utcnow()
+            workflow.result = full_state if isinstance(full_state, dict) else {}
+            await db.commit()
+
+            return {"status": workflow.status.value, "workflow_id": workflow_id}
+
+    return run_async(_run())
+
+
 
 
 @celery_app.task(
@@ -252,6 +391,7 @@ def generate_embeddings(self, repository_id: str, files: list[dict]):
             return result
         finally:
             from app.database import engine
-            await engine.dispose()
+            if getattr(engine, 'name', '') == 'postgresql':
+                await engine.dispose()
 
     return run_async(_run())

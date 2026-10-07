@@ -26,9 +26,9 @@
 .type-desc { font-size: 0.75rem; color: var(--text-muted); }
 
 /* Workflow List */
-.workflow-list { display: flex; flex-direction: column; gap: 1rem; }
+.workflow-list { display: flex; flex-direction: column; gap: 1rem; width: 100%; min-width: 0; }
 
-.workflow-card { padding: 0; overflow: hidden; }
+.workflow-card { padding: 0; overflow: hidden; width: 100%; min-width: 0; }
 .workflow-card.expanded { border-color: rgba(99,102,241,0.3); }
 
 .workflow-card-header {

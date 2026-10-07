@@ -17,6 +17,10 @@ celery_app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    broker_connection_retry_on_startup=False,
+    broker_connection_timeout=2.0,
+    broker_transport_options={"max_retries": 1, "socket_timeout": 2.0},
+    task_publish_retry=False,
     task_routes={
         "app.workers.tasks.analyze_repository": {"queue": "analysis"},
         "app.workers.tasks.run_workflow": {"queue": "workflows"},

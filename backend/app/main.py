@@ -76,6 +76,8 @@ app.add_middleware(
 )
 
 # ─── Routers ──────────────────────────────────────────────────────────────────
+from app.routers import api_tasks
+app.include_router(api_tasks.router)
 app.include_router(auth.router, prefix=settings.API_PREFIX)
 app.include_router(repositories.router, prefix=settings.API_PREFIX)
 app.include_router(workflows.router, prefix=settings.API_PREFIX)
@@ -102,3 +104,4 @@ async def root():
         "docs": "/docs",
         "version": settings.APP_VERSION,
     }
+

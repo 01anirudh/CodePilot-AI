@@ -1,4 +1,4 @@
-# CodePilot AI — Backend Dependencies
+# CodePilot AI — Worker Dependencies
 # FastAPI & Web
 fastapi==0.115.0
 uvicorn[standard]==0.30.0
@@ -20,7 +20,6 @@ bcrypt>=3.2.2
 pydantic>=2.9.2
 pydantic-settings>=2.5.2
 email-validator>=2.0.0
-
 
 # AI / LangChain
 langchain==0.3.7

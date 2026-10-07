@@ -11,19 +11,6 @@ import useAppStore from '../stores/appStore'
 import './Dashboard.css'
 import '../components/KPICard.css'
 
-const MOCK_ACTIVITY = Array.from({ length: 7 }, (_, i) => ({
-  day: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][i],
-  workflows: Math.floor(Math.random() * 12) + 2,
-  bugs: Math.floor(Math.random() * 6) + 1,
-}))
-
-const RECENT_WORKFLOW_MOCK = [
-  { id: '1', task: 'Fix authentication JWT bug', status: 'completed', repo: 'api-service', time: '2h ago', score: 89 },
-  { id: '2', task: 'Add user profile endpoint', status: 'running', repo: 'backend', time: '15m ago', score: null },
-  { id: '3', task: 'Generate unit tests for PaymentService', status: 'awaiting_approval', repo: 'payments', time: '1h ago', score: 92 },
-  { id: '4', task: 'Refactor database queries', status: 'completed', repo: 'data-layer', time: '5h ago', score: 76 },
-]
-
 const STATUS_BADGE = {
   completed: 'badge-success',
   running: 'badge-info',
@@ -48,7 +35,37 @@ export default function Dashboard() {
   }, [])
 
   const completedWorkflows = workflows.filter(w => w.status === 'completed').length
-  const runningWorkflows = workflows.filter(w => w.status === 'running').length
+  const runningWorkflows = workflows.filter(w => w.status === 'running' || w.status?.startsWith('routing_to_')).length
+
+  const recentWorkflows = workflows.slice(0, 4)
+  
+  const activityData = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date()
+    d.setDate(d.getDate() - (6 - i))
+    const dayStr = d.toLocaleDateString('en-US', { weekday: 'short' })
+    const dayDate = d.toDateString()
+    
+    const dayWfs = workflows.filter(w => new Date(w.created_at).toDateString() === dayDate)
+    return {
+      day: dayStr,
+      workflows: dayWfs.length,
+      bugs: dayWfs.filter(w => w.type === 'bug_fix').length
+    }
+  })
+
+  const latestWorkflow = workflows[0]
+  let latestCompletedSteps = []
+  let latestCurrentAgent = ''
+  if (latestWorkflow && latestWorkflow.result) {
+      latestCompletedSteps = latestWorkflow.result.completed_steps || []
+      const status = latestWorkflow.status || ''
+      if (status.startsWith('routing_to_')) {
+          latestCurrentAgent = status.replace('routing_to_', '')
+      }
+      if (['completed', 'failed', 'rejected', 'awaiting_approval'].includes(status)) {
+          latestCurrentAgent = ''
+      }
+  }
 
   return (
     <div className="dashboard animate-fade-up">
@@ -132,7 +149,7 @@ export default function Dashboard() {
             </span>
           </div>
           <ResponsiveContainer width="100%" height={180}>
-            <AreaChart data={MOCK_ACTIVITY}>
+            <AreaChart data={activityData}>
               <defs>
                 <linearGradient id="wfGrad" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3} />
@@ -165,21 +182,23 @@ export default function Dashboard() {
             </Link>
           </div>
           <div className="recent-list">
-            {RECENT_WORKFLOW_MOCK.map(wf => (
+            {recentWorkflows.length === 0 ? (
+                <p className="text-muted" style={{ padding: '1rem' }}>No workflows yet.</p>
+            ) : recentWorkflows.map(wf => (
               <div key={wf.id} className="recent-item">
                 <div className="recent-item-info">
                   <span className={`badge ${STATUS_BADGE[wf.status] || 'badge-muted'}`}>
                     {wf.status.replace('_', ' ')}
                   </span>
-                  <p className="recent-task">{wf.task}</p>
+                  <p className="recent-task">{wf.task_description || 'No description'}</p>
                   <p className="recent-meta">
                     <GitBranch size={12} />
-                    {wf.repo} · {wf.time}
+                    {new Date(wf.created_at).toLocaleString()}
                   </p>
                 </div>
-                {wf.score !== null && (
+                {wf.result?.review_result?.overall_score && (
                   <div className="recent-score">
-                    <span>{wf.score}</span>
+                    <span>{wf.result.review_result.overall_score}</span>
                     <span className="score-label">score</span>
                   </div>
                 )}
@@ -201,18 +220,20 @@ export default function Dashboard() {
           </Link>
         </div>
         <WorkflowPipeline
-          completedSteps={['analyzer', 'knowledge', 'planner', 'codegen']}
-          currentAgent="testing"
-          errors={[]}
+          completedSteps={latestCompletedSteps}
+          currentAgent={latestCurrentAgent}
+          errors={latestWorkflow?.result?.errors || []}
         />
         <div className="pipeline-status-row">
-          <span className="badge badge-info">
-            <span className="dot dot-info animate-pulse-ring" />
-            Testing agent is running
+          <span className={`badge ${latestCurrentAgent ? 'badge-info' : 'badge-muted'}`}>
+            {latestCurrentAgent && <span className="dot dot-info animate-pulse-ring" />}
+            {latestCurrentAgent ? `${latestCurrentAgent} agent is running` : (latestWorkflow ? `Status: ${latestWorkflow.status.replace('_', ' ')}` : 'No active workflows')}
           </span>
-          <span className="text-muted" style={{ fontSize: '0.8125rem' }}>
-            4 / 9 agents completed
-          </span>
+          {latestWorkflow && (
+              <span className="text-muted" style={{ fontSize: '0.8125rem' }}>
+                {latestCompletedSteps.length} / 9 agents completed
+              </span>
+          )}
         </div>
       </div>
     </div>

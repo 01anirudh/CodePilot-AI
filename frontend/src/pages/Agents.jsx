@@ -35,41 +35,47 @@ export default function Agents() {
             <span className="arch-label">Input</span>
             <div className="arch-node input-node">📥 Task Request</div>
           </div>
+          
           <div className="arch-arrow">→</div>
-          <div className="arch-group">
-            <span className="arch-label">Analysis</span>
-            <div className="arch-stack">
-              <div className="arch-node" style={{ background: '#6366f120', borderColor: '#6366f1' }}>🔍 Analyzer</div>
-              <div className="arch-node" style={{ background: '#8b5cf620', borderColor: '#8b5cf6' }}>🧠 Knowledge</div>
-              <div className="arch-node" style={{ background: '#06b6d420', borderColor: '#06b6d4' }}>📋 Planner</div>
+          
+          <div className="arch-group" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+            <span className="arch-label">Dynamic Router</span>
+            <div className="arch-node" style={{ background: '#ec489920', borderColor: '#ec4899', padding: '1.5rem', fontWeight: 'bold', boxShadow: '0 0 15px #ec489940' }}>
+              👑 Supervisor LLM
             </div>
+            <span className="text-muted" style={{ fontSize: '0.75rem', marginTop: '0.5rem' }}>Decides next step</span>
           </div>
-          <div className="arch-arrow">→</div>
+
+          <div className="arch-arrow">↔</div>
+
           <div className="arch-group">
-            <span className="arch-label">Execution (Parallel)</span>
-            <div className="arch-parallel">
+            <span className="arch-label">Specialized Agent Pool</span>
+            <div className="arch-parallel" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.5rem', padding: '0.5rem', background: 'var(--surface-color)', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
               {[
+                ['🔍', 'Analyzer', '#6366f1'],
+                ['🧠', 'Knowledge', '#8b5cf6'],
+                ['📋', 'Planner', '#06b6d4'],
                 ['⚡', 'CodeGen', '#f59e0b'],
                 ['🔧', 'Refactor', '#10b981'],
                 ['🧪', 'Testing', '#3b82f6'],
                 ['👁️', 'Review', '#ef4444'],
                 ['📚', 'Docs', '#84cc16'],
               ].map(([icon, name, color]) => (
-                <div key={name} className="arch-node" style={{ background: `${color}20`, borderColor: color }}>
+                <div key={name} className="arch-node" style={{ background: `${color}15`, borderColor: color, margin: 0, padding: '0.5rem 1rem' }}>
                   {icon} {name}
                 </div>
               ))}
             </div>
           </div>
+
           <div className="arch-arrow">→</div>
+
           <div className="arch-group">
-            <span className="arch-label">Gate</span>
-            <div className="arch-node human-node">👤 Human Approval</div>
-          </div>
-          <div className="arch-arrow">→</div>
-          <div className="arch-group">
-            <span className="arch-label">Output</span>
-            <div className="arch-node" style={{ background: '#f9731620', borderColor: '#f97316' }}>🐙 GitHub PR</div>
+            <span className="arch-label">Gate & Output</span>
+            <div className="arch-stack" style={{ gap: '0.5rem' }}>
+              <div className="arch-node human-node">👤 Human Approval</div>
+              <div className="arch-node" style={{ background: '#f9731620', borderColor: '#f97316' }}>🐙 GitHub PR</div>
+            </div>
           </div>
         </div>
       </div>

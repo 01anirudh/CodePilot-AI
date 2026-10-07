@@ -141,36 +141,39 @@ async def stream_workflow_logs(
     """Server-Sent Events endpoint for real-time workflow log streaming."""
 
     async def event_generator() -> AsyncGenerator[str, None]:
+        from app.database import AsyncSessionLocal
+        
         prev_count = 0
         max_polls = 120  # 2 minutes max streaming
 
-        for _ in range(max_polls):
-            result = await db.execute(
-                select(Workflow).where(Workflow.id == workflow_id)
-            )
-            workflow = result.scalar_one_or_none()
-            if not workflow:
-                yield f"data: {json.dumps({'error': 'Workflow not found'})}\n\n"
-                break
+        async with AsyncSessionLocal() as session:
+            for _ in range(max_polls):
+                result = await session.execute(
+                    select(Workflow).where(Workflow.id == workflow_id)
+                )
+                workflow = result.scalar_one_or_none()
+                if not workflow:
+                    yield f"data: {json.dumps({'error': 'Workflow not found'})}\n\n"
+                    break
 
-            # Send workflow status
-            logs = (workflow.result or {}).get("logs", [])
-            if len(logs) > prev_count:
-                for log_entry in logs[prev_count:]:
-                    yield f"data: {json.dumps(log_entry)}\n\n"
-                prev_count = len(logs)
+                # Send workflow status
+                logs = (workflow.result or {}).get("logs", [])
+                if len(logs) > prev_count:
+                    for log_entry in logs[prev_count:]:
+                        yield f"data: {json.dumps(log_entry)}\n\n"
+                    prev_count = len(logs)
 
-            # Check terminal states
-            if workflow.status in (
-                WorkflowStatus.COMPLETED,
-                WorkflowStatus.FAILED,
-                WorkflowStatus.AWAITING_APPROVAL,
-                WorkflowStatus.REJECTED,
-            ):
-                yield f"data: {json.dumps({'status': workflow.status.value, 'done': True})}\n\n"
-                break
+                # Check terminal states
+                if workflow.status in (
+                    WorkflowStatus.COMPLETED,
+                    WorkflowStatus.FAILED,
+                    WorkflowStatus.AWAITING_APPROVAL,
+                    WorkflowStatus.REJECTED,
+                ):
+                    yield f"data: {json.dumps({'status': workflow.status.value, 'done': True})}\n\n"
+                    break
 
-            await asyncio.sleep(2)
+                await asyncio.sleep(2)
 
     return StreamingResponse(
         event_generator(),
@@ -216,6 +219,10 @@ async def approve_workflow(
             {"human_approved": True},
             as_node="human_approval",
         )
+        
+        # Trigger Celery task to resume graph
+        from app.workers.tasks import resume_workflow
+        resume_workflow.delay(str(workflow_id))
     else:
         workflow.status = WorkflowStatus.REJECTED
         await log_action(db, "workflow.rejected", str(current_user.id), "workflow", str(workflow_id),

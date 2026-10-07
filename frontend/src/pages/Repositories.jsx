@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, GitBranch, Trash2, ExternalLink, RefreshCw, Search } from 'lucide-react'
 import useAppStore from '../stores/appStore'
 import './Repositories.css'
@@ -69,10 +70,10 @@ export default function Repositories() {
         />
       </div>
 
-      {/* Add Repo Modal */}
-      {showAdd && (
+      {/* Add Repo Modal — portal renders directly in document.body to avoid stacking context */}
+      {showAdd && createPortal(
         <div className="modal-overlay" onClick={() => setShowAdd(false)}>
-          <div className="modal card" onClick={e => e.stopPropagation()}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
             <h3>Connect Repository</h3>
             <p className="text-muted" style={{ marginBottom: '1.5rem' }}>
               Enter a GitHub repository URL to start analysis
@@ -115,7 +116,8 @@ export default function Repositories() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Repo Grid */}

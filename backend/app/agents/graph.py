@@ -2,10 +2,12 @@
 LangGraph Workflow Orchestration — wires all 9 agents into a StateGraph
 with human-in-the-loop checkpoint and streaming support.
 """
+from typing import Literal
 from typing import TypedDict, Any, Optional, Annotated
 from langgraph.graph import StateGraph, END
 from langgraph.checkpoint.memory import MemorySaver
 import operator
+from langgraph.types import Command
 
 
 class WorkflowState(TypedDict):
@@ -46,7 +48,7 @@ class WorkflowState(TypedDict):
 
 # ─── Node Functions ──────────────────────────────────────────────────────────
 
-async def analyzer_node(state: WorkflowState) -> dict:
+async def analyzer_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.analyzer import run_analyzer_agent
     try:
         result = await run_analyzer_agent(
@@ -54,23 +56,23 @@ async def analyzer_node(state: WorkflowState) -> dict:
             tree=state.get("file_tree", []),
             readme=state.get("readme", ""),
         )
-        return {
+        return Command(goto="supervisor", update={
             "analysis_result": result,
             "current_agent": "knowledge",
             "completed_steps": ["analyzer"],
             "logs": [{"agent": "analyzer", "status": "completed", "message": f"Analyzed repo: {result.get('language', '?')} / {result.get('framework', '?')}"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={
             "errors": [{"agent": "analyzer", "error": str(e)}],
             "logs": [{"agent": "analyzer", "status": "error", "message": str(e)}],
             "current_agent": "planner",  # Continue with defaults
             "completed_steps": ["analyzer"],
             "analysis_result": {},
-        }
+        })
 
 
-async def knowledge_node(state: WorkflowState) -> dict:
+async def knowledge_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.knowledge import run_knowledge_agent
     try:
         # Build files list from tree (simplified — in production fetch content)
@@ -84,23 +86,23 @@ async def knowledge_node(state: WorkflowState) -> dict:
             repository_id=state["repository_id"],
             files=files,
         )
-        return {
+        return Command(goto="supervisor", update={     
             "knowledge_result": result,
             "current_agent": "planner",
             "completed_steps": ["knowledge"],
             "logs": [{"agent": "knowledge", "status": "completed", "message": f"Embedded {result.get('chunks_embedded', 0)} chunks"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={
             "errors": [{"agent": "knowledge", "error": str(e)}],
             "logs": [{"agent": "knowledge", "status": "error", "message": str(e)}],
             "current_agent": "planner",
             "completed_steps": ["knowledge"],
             "knowledge_result": {},
-        }
+        })
 
 
-async def planner_node(state: WorkflowState) -> dict:
+async def planner_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.planner import run_planner_agent
     try:
         plan = await run_planner_agent(
@@ -108,23 +110,23 @@ async def planner_node(state: WorkflowState) -> dict:
             repo_analysis=state.get("analysis_result", {}),
             workflow_type=state.get("workflow_type", "full"),
         )
-        return {
+        return Command(goto="supervisor", update={
             "plan": plan,
             "current_agent": "codegen",
             "completed_steps": ["planner"],
             "logs": [{"agent": "planner", "status": "completed", "message": f"Plan created: {len(plan.get('steps', []))} steps"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={
             "errors": [{"agent": "planner", "error": str(e)}],
             "logs": [{"agent": "planner", "status": "error", "message": str(e)}],
             "current_agent": "codegen",
             "completed_steps": ["planner"],
             "plan": {},
-        }
+        })
 
 
-async def codegen_node(state: WorkflowState) -> dict:
+async def codegen_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.codegen import run_codegen_agent
     from app.agents.knowledge import semantic_search
     try:
@@ -148,23 +150,23 @@ async def codegen_node(state: WorkflowState) -> dict:
             repo_analysis=state.get("analysis_result", {}),
             relevant_code=relevant_code,
         )
-        return {
+        return Command(goto="supervisor", update={ 
             "codegen_result": result,
             "current_agent": "testing",
             "completed_steps": ["codegen"],
             "logs": [{"agent": "codegen", "status": "completed", "message": f"Generated {len(result.get('files', []))} files"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={
             "errors": [{"agent": "codegen", "error": str(e)}],
             "logs": [{"agent": "codegen", "status": "error", "message": str(e)}],
             "current_agent": "testing",
             "completed_steps": ["codegen"],
             "codegen_result": {"files": []},
-        }
+        })
 
 
-async def testing_node(state: WorkflowState) -> dict:
+async def testing_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.testing import run_testing_agent
     try:
         result = await run_testing_agent(
@@ -172,23 +174,23 @@ async def testing_node(state: WorkflowState) -> dict:
             repo_analysis=state.get("analysis_result", {}),
             task_description=state["task_description"],
         )
-        return {
+        return Command(goto="supervisor", update={ 
             "testing_result": result,
             "current_agent": "reviewer",
             "completed_steps": ["testing"],
             "logs": [{"agent": "testing", "status": "completed", "message": f"Generated {result.get('total_test_count', 0)} tests ({result.get('coverage_estimate', '?')} coverage)"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={
             "errors": [{"agent": "testing", "error": str(e)}],
             "logs": [{"agent": "testing", "status": "error", "message": str(e)}],
             "current_agent": "reviewer",
             "completed_steps": ["testing"],
             "testing_result": {},
-        }
+        })
 
 
-async def refactor_node(state: WorkflowState) -> dict:
+async def refactor_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.refactor import run_refactor_agent
     try:
         files = state.get("codegen_result", {}).get("files", [])
@@ -196,21 +198,21 @@ async def refactor_node(state: WorkflowState) -> dict:
             files=files,
             repo_analysis=state.get("analysis_result", {}),
         )
-        return {
+        return Command(goto="supervisor", update={
             "refactor_result": result,
             "completed_steps": ["refactor"],
             "logs": [{"agent": "refactor", "status": "completed", "message": f"Found {len(result.get('issues', []))} issues, quality improved {result.get('quality_score_before', 0)} → {result.get('quality_score_after', 0)}"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={  
             "errors": [{"agent": "refactor", "error": str(e)}],
             "logs": [{"agent": "refactor", "status": "error", "message": str(e)}],
             "completed_steps": ["refactor"],
             "refactor_result": {},
-        }
+        })
 
 
-async def reviewer_node(state: WorkflowState) -> dict:
+async def reviewer_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.reviewer import run_reviewer_agent
     try:
         result = await run_reviewer_agent(
@@ -218,23 +220,23 @@ async def reviewer_node(state: WorkflowState) -> dict:
             test_results=state.get("testing_result", {}),
             repo_analysis=state.get("analysis_result", {}),
         )
-        return {
+        return Command(goto="supervisor", update={   
             "review_result": result,
             "current_agent": "docs",
             "completed_steps": ["reviewer"],
             "logs": [{"agent": "reviewer", "status": "completed", "message": f"Review: {result.get('verdict', 'approve')} (score: {result.get('overall_score', 0)}/100)"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={    
             "errors": [{"agent": "reviewer", "error": str(e)}],
             "logs": [{"agent": "reviewer", "status": "error", "message": str(e)}],
             "current_agent": "docs",
             "completed_steps": ["reviewer"],
             "review_result": {"overall_score": 70, "verdict": "approve"},
-        }
+        })  
 
 
-async def docs_node(state: WorkflowState) -> dict:
+async def docs_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.docs import run_docs_agent
     try:
         result = await run_docs_agent(
@@ -242,32 +244,32 @@ async def docs_node(state: WorkflowState) -> dict:
             repo_analysis=state.get("analysis_result", {}),
             task_description=state["task_description"],
         )
-        return {
+        return Command(goto="supervisor", update={
             "docs_result": result,
             "current_agent": "human_approval",
             "completed_steps": ["docs"],
             "logs": [{"agent": "docs", "status": "completed", "message": "Documentation generated"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={
             "errors": [{"agent": "docs", "error": str(e)}],
             "logs": [{"agent": "docs", "status": "error", "message": str(e)}],
             "current_agent": "human_approval",
             "completed_steps": ["docs"],
             "docs_result": {},
-        }
+        }   )
 
 
-async def human_approval_node(state: WorkflowState) -> dict:
+async def human_approval_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     """Pause for human review — in LangGraph this is an interrupt point."""
-    return {
+    return Command(goto="supervisor", update={     
         "current_agent": "github",
         "status": "awaiting_approval",
         "logs": [{"agent": "human_approval", "status": "waiting", "message": "Awaiting human approval before creating PR"}],
-    }
+    })
 
 
-async def github_node(state: WorkflowState) -> dict:
+async def github_node(state: WorkflowState) -> Command[Literal["supervisor"]]:
     from app.agents.github_agent import run_github_agent
     try:
         result = await run_github_agent(
@@ -281,39 +283,46 @@ async def github_node(state: WorkflowState) -> dict:
             github_token=state.get("github_token"),
             simulate=not bool(state.get("github_token")),
         )
-        return {
+        return Command(goto="supervisor", update={
             "github_result": result,
             "current_agent": "completed",
             "completed_steps": ["github"],
             "status": "completed",
             "logs": [{"agent": "github", "status": "completed", "message": f"PR {'simulated' if result.get('simulated') else 'created'}: {result.get('pr_url', 'N/A')}"}],
-        }
+        })
     except Exception as e:
-        return {
+        return Command(goto="supervisor", update={
             "errors": [{"agent": "github", "error": str(e)}],
             "logs": [{"agent": "github", "status": "error", "message": str(e)}],
             "completed_steps": ["github"],
             "status": "failed",
             "github_result": {},
-        }
+        })
 
 
-# ─── Conditional Edges ────────────────────────────────────────────────────────
-
-def route_after_review(state: WorkflowState) -> str:
-    """Skip docs if not needed, or go to docs."""
-    wtype = state.get("workflow_type", "full")
-    if wtype == "code_review":
-        return "human_approval"
-    return "docs"
-
-
-def route_after_human_approval(state: WorkflowState) -> str:
-    """Route based on human approval decision."""
-    if state.get("human_approved", False):
-        return "github"
-    return END
-
+# -----Supervisor Node------------------
+async def supervisor_node(state: WorkflowState) -> Command[
+    Literal["analyzer", "knowledge", "planner", "codegen", "refactor", "testing", "reviewer", "docs", "human_approval", "github", "__end__"]]:
+    from app.agents.supervisor import run_supervisor_agent
+    
+    result = await run_supervisor_agent(
+        task_description=state.get("task_description", ""),
+        completed_steps=state.get("completed_steps", []),
+        current_plan=state.get("plan", {}),
+        errors=state.get("errors", []),
+        human_approved=state.get("human_approved", False),
+        workflow_type=state.get("workflow_type", "full")
+    )
+    
+    next_agent = result.get("next", "finish")
+    if next_agent == "finish":
+        return Command(goto=END)
+        
+    return Command(goto=next_agent, update={
+        "status": f"routing_to_{next_agent}",
+        "logs": [{"agent": "supervisor", "status": "routed", "message": f"Routing to {next_agent}: {result.get('reason', '')}"}]
+    })
+    
 
 # ─── Build Graph ──────────────────────────────────────────────────────────────
 
@@ -321,6 +330,7 @@ def build_workflow_graph() -> StateGraph:
     graph = StateGraph(WorkflowState)
 
     # Add nodes
+    graph.add_node("supervisor", supervisor_node)
     graph.add_node("analyzer", analyzer_node)
     graph.add_node("knowledge", knowledge_node)
     graph.add_node("planner", planner_node)
@@ -333,31 +343,7 @@ def build_workflow_graph() -> StateGraph:
     graph.add_node("github", github_node)
 
     # Entry point
-    graph.set_entry_point("analyzer")
-
-    # Linear edges
-    graph.add_edge("analyzer", "knowledge")
-    graph.add_edge("knowledge", "planner")
-    graph.add_edge("planner", "codegen")
-    graph.add_edge("codegen", "refactor")
-    graph.add_edge("refactor", "testing")
-    graph.add_edge("testing", "reviewer")
-
-    # Conditional after reviewer
-    graph.add_conditional_edges("reviewer", route_after_review, {
-        "docs": "docs",
-        "human_approval": "human_approval",
-    })
-
-    graph.add_edge("docs", "human_approval")
-
-    # Conditional after human approval
-    graph.add_conditional_edges("human_approval", route_after_human_approval, {
-        "github": "github",
-        END: END,
-    })
-
-    graph.add_edge("github", END)
+    graph.set_entry_point("supervisor")
 
     return graph
 
@@ -368,3 +354,10 @@ workflow_graph = build_workflow_graph().compile(
     checkpointer=memory,
     interrupt_before=["human_approval"],
 )
+
+try:
+    with open("graph.png", "wb") as f:
+        f.write(workflow_graph.get_graph().draw_mermaid_png())
+except Exception:
+    pass
+

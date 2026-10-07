@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Plus, Workflow, Play, CheckCircle2, Clock, XCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import useAppStore from '../stores/appStore'
 import WorkflowPipeline from '../components/WorkflowPipeline'
 import StreamingLog from '../components/StreamingLog'
-import { workflowApi } from '../services/api'
+import { workflowApi, BASE_URL } from '../services/api'
 import './Workflows.css'
 
 const WORKFLOW_TYPES = [
@@ -17,13 +18,20 @@ const WORKFLOW_TYPES = [
 ]
 
 const STATUS_CONFIG = {
-  queued:            { icon: <Clock size={16} />, cls: 'badge-muted',    label: 'Queued' },
-  running:           { icon: <Play size={16} />, cls: 'badge-info',      label: 'Running' },
-  awaiting_approval: { icon: <Clock size={16} />, cls: 'badge-warning',  label: 'Awaiting Approval' },
-  completed:         { icon: <CheckCircle2 size={16} />, cls: 'badge-success', label: 'Completed' },
-  failed:            { icon: <XCircle size={16} />, cls: 'badge-error',  label: 'Failed' },
-  rejected:          { icon: <XCircle size={16} />, cls: 'badge-error',  label: 'Rejected' },
+  queued:               { icon: <Clock size={16} />, cls: 'badge-muted',    label: 'Queued' },
+  running:              { icon: <Play size={16} />, cls: 'badge-info',      label: 'Running' },
+  analyzing:            { icon: <Clock size={16} />, cls: 'badge-info',     label: 'Analyzing' },
+  planning:             { icon: <Clock size={16} />, cls: 'badge-info',     label: 'Planning' },
+  coding:               { icon: <Play size={16} />, cls: 'badge-info',      label: 'Coding' },
+  testing:              { icon: <Play size={16} />, cls: 'badge-info',      label: 'Testing' },
+  reviewing:            { icon: <Clock size={16} />, cls: 'badge-info',     label: 'Reviewing' },
+  waiting_for_approval: { icon: <Clock size={16} />, cls: 'badge-warning',  label: 'Waiting for Approval' },
+  awaiting_approval:    { icon: <Clock size={16} />, cls: 'badge-warning',  label: 'Awaiting Approval' },
+  completed:            { icon: <CheckCircle2 size={16} />, cls: 'badge-success', label: 'Completed' },
+  failed:               { icon: <XCircle size={16} />, cls: 'badge-error',  label: 'Failed' },
+  rejected:             { icon: <XCircle size={16} />, cls: 'badge-error',  label: 'Rejected' },
 }
+
 
 export default function Workflows() {
   const { repositories, workflows, workflowsLoading, fetchWorkflows, fetchRepositories, createWorkflow, approveWorkflow } = useAppStore()
@@ -72,10 +80,10 @@ export default function Workflows() {
         </button>
       </div>
 
-      {/* Create Modal */}
-      {showCreate && (
+      {/* Create Modal — rendered via portal directly in document.body to avoid stacking context issues */}
+      {showCreate && createPortal(
         <div className="modal-overlay" onClick={() => setShowCreate(false)}>
-          <div className="modal card workflow-modal" onClick={e => e.stopPropagation()}>
+          <div className="modal workflow-modal" onClick={e => e.stopPropagation()}>
             <h3>Create Workflow</h3>
             <p className="text-muted" style={{ marginBottom: '1.5rem' }}>
               Describe what you want the AI to do with your code.
@@ -132,7 +140,8 @@ export default function Workflows() {
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Workflow List */}
@@ -165,11 +174,105 @@ export default function Workflows() {
 }
 
 function WorkflowCard({ workflow, expanded, onToggle, onApprove }) {
-  const sc = STATUS_CONFIG[workflow.status] || STATUS_CONFIG.queued
+  const statusKey = (workflow.status || 'queued').toLowerCase()
+  const sc = STATUS_CONFIG[statusKey] || STATUS_CONFIG.queued
   const result = workflow.result || {}
-  const completedSteps = result.completed_steps || []
-  const currentAgent = result.current_agent || ''
-  const logs = result.logs || []
+  
+  const [liveLogs, setLiveLogs] = useState(result.logs || [])
+  const [isStreaming, setIsStreaming] = useState(false)
+  const abortControllerRef = useRef(null)
+
+  useEffect(() => {
+    // Only stream if expanded and not in a terminal state
+    const isTerminal = ['completed', 'failed', 'rejected', 'waiting_for_approval', 'awaiting_approval'].includes(statusKey)
+    if (expanded && !isTerminal) {
+      setIsStreaming(true)
+      
+      const setupStream = async () => {
+        const token = localStorage.getItem('codepilot_token')
+        const url = `${BASE_URL}/workflows/${workflow.id}/stream`
+        const controller = new AbortController()
+        abortControllerRef.current = controller
+
+        try {
+          const response = await fetch(url, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: controller.signal
+          })
+          
+          if (!response.ok) throw new Error('Stream failed')
+          
+          const reader = response.body.getReader()
+          const decoder = new TextDecoder()
+          let buffer = ''
+          
+          while (true) {
+            const { value, done } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            
+            const lines = buffer.split('\n\n')
+            buffer = lines.pop()
+            
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const data = JSON.parse(line.slice(6))
+                
+                if (data.error || data.done) {
+                  setIsStreaming(false)
+                  break
+                }
+                
+                if (data.agent || data.status) {
+                  setLiveLogs(prev => {
+                     if (prev.some(l => l.message === data.message && l.timestamp === data.timestamp)) return prev
+                     return [...prev, data]
+                  })
+                }
+              }
+            }
+          }
+        } catch (err) {
+          if (err.name !== 'AbortError') console.error('SSE Error:', err)
+          setIsStreaming(false)
+        }
+      }
+      
+      setupStream()
+      
+      return () => {
+        if (abortControllerRef.current) abortControllerRef.current.abort()
+      }
+    } else {
+      setLiveLogs(result.logs || [])
+      setIsStreaming(false)
+    }
+  }, [expanded, workflow.id, statusKey])
+
+  let currentAgent = ''
+  let thinking = ''
+  let completedSteps = result.completed_steps ? [...result.completed_steps] : []
+  
+  const lastSupervisorLog = [...liveLogs].reverse().find(l => l.agent === 'supervisor' && l.status === 'routed')
+  if (lastSupervisorLog) {
+      const match = lastSupervisorLog.message.match(/Routing to (\w+): (.*)/)
+      if (match) {
+          currentAgent = match[1]
+          thinking = match[2]
+      }
+  }
+
+  if (['completed', 'failed', 'rejected', 'waiting_for_approval', 'awaiting_approval'].includes(statusKey)) {
+      currentAgent = ''
+      thinking = ''
+  }
+
+
+  liveLogs.forEach(log => {
+      if (log.status === 'completed' && log.agent !== 'supervisor' && log.agent !== 'human_approval' && !completedSteps.includes(log.agent)) {
+          completedSteps.push(log.agent)
+      }
+  })
 
   return (
     <div className={`card workflow-card ${expanded ? 'expanded' : ''}`}>
@@ -192,13 +295,24 @@ function WorkflowCard({ workflow, expanded, onToggle, onApprove }) {
       {expanded && (
         <div className="workflow-card-body">
           <div className="divider" />
+          
+          {currentAgent && (
+            <div className="active-agent-banner card" style={{ padding: '0.75rem 1rem', marginBottom: '1rem', background: 'var(--surface-color)', border: '1px solid var(--border-color)', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+              <div className="node-pulse" style={{ width: 12, height: 12, backgroundColor: 'var(--primary-color)', flexShrink: 0 }}></div>
+              <div style={{ flex: 1 }}>
+                <strong style={{ textTransform: 'capitalize' }}>{currentAgent}</strong> is working...
+                {thinking && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.2rem' }}>💬 "{thinking}"</div>}
+              </div>
+            </div>
+          )}
+
           <WorkflowPipeline
             completedSteps={completedSteps}
             currentAgent={currentAgent}
             errors={result.errors || []}
           />
 
-          {logs.length > 0 && <StreamingLog logs={logs} title="Execution Log" />}
+          {liveLogs.length > 0 && <StreamingLog logs={liveLogs} isStreaming={isStreaming} title="Execution Log" />}
 
           {/* Plan */}
           {workflow.plan && (
@@ -220,6 +334,52 @@ function WorkflowCard({ workflow, expanded, onToggle, onApprove }) {
             <div className="alert alert-success">
               🐙 Pull Request: <a href={result.github_result.pr_url} target="_blank" rel="noreferrer">{result.github_result.pr_url}</a>
               {result.github_result.simulated && ' (simulated — add GITHUB_TOKEN to create real PR)'}
+            </div>
+          )}
+
+          {/* Generated Code Review */}
+          {workflow.status === 'awaiting_approval' && (
+            <div className="wf-plan-box" style={{ marginTop: '1.5rem' }}>
+              <h4>Review Generated Code</h4>
+              <p className="text-muted">Review the files created or modified by the agents below:</p>
+              
+              <div className="generated-files-list">
+                {/* CodeGen Files */}
+                {result.codegen_result?.files?.map((f, i) => (
+                  <details key={`codegen-${i}`} className="gf-content-details card" style={{ padding: '0.5rem 1rem', marginTop: '0.5rem' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 500 }}>
+                      <span className={`badge badge-${f.action === 'delete' ? 'error' : f.action === 'modify' ? 'warning' : 'success'}`} style={{ marginRight: '0.5rem' }}>
+                        {f.action}
+                      </span>
+                      {f.path}
+                    </summary>
+                    {f.description && <p className="text-muted" style={{ margin: '0.5rem 0 0.5rem 0', fontSize: '0.875rem' }}>{f.description}</p>}
+                    <pre className="code-block" style={{ maxHeight: '300px', overflowY: 'auto' }}>{f.content}</pre>
+                  </details>
+                ))}
+
+                {/* Refactor Files */}
+                {result.refactor_result?.refactored_files?.map((f, i) => (
+                  <details key={`refactor-${i}`} className="gf-content-details card" style={{ padding: '0.5rem 1rem', marginTop: '0.5rem' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 500 }}>
+                      <span className="badge badge-warning" style={{ marginRight: '0.5rem' }}>refactor</span>
+                      {f.path}
+                    </summary>
+                    <pre className="code-block" style={{ maxHeight: '300px', overflowY: 'auto', marginTop: '0.5rem' }}>{f.refactored_content}</pre>
+                  </details>
+                ))}
+
+                {/* Testing Files */}
+                {result.testing_result?.test_files?.map((f, i) => (
+                  <details key={`test-${i}`} className="gf-content-details card" style={{ padding: '0.5rem 1rem', marginTop: '0.5rem' }}>
+                    <summary style={{ cursor: 'pointer', fontWeight: 500 }}>
+                      <span className="badge badge-info" style={{ marginRight: '0.5rem' }}>test</span>
+                      {f.path}
+                    </summary>
+                    <pre className="code-block" style={{ maxHeight: '300px', overflowY: 'auto', marginTop: '0.5rem' }}>{f.content}</pre>
+                  </details>
+                ))}
+              </div>
             </div>
           )}
 

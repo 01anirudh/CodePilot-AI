@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies
+# Install essential system tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
@@ -13,13 +13,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Application code
+# Application source code
 COPY . .
 
-# Create non-root user
+# Run as non-root user for security
 RUN useradd -m -u 1000 codepilot && chown -R codepilot:codepilot /app
 USER codepilot
 
-EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=info", "-Q", "analysis,workflows,embeddings,celery", "--concurrency=2"]

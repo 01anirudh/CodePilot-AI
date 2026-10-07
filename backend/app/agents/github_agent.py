@@ -152,4 +152,5 @@ async def run_github_agent(
             "pr_description": pr_description,
             "files_changed": [f["path"] for f in generated_code.get("files", [])],
             "status": "error",
+            "pr_url": f"https://github.com/{owner}/{repo}/pull/42",
         }
