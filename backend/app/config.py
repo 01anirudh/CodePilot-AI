@@ -1,7 +1,15 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator, model_validator
+from pydantic import field_validator
 from typing import Optional, Any
 import json
+
+
+_DEFAULT_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:3000",
+]
 
 
 class Settings(BaseSettings):
@@ -13,7 +21,7 @@ class Settings(BaseSettings):
 
     # API
     API_PREFIX: str = "/api/v1"
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:5173", "http://localhost:3000", "http://127.0.0.1:5173", "http://127.0.0.1:3000"]
+    ALLOWED_ORIGINS: list[str] = _DEFAULT_ORIGINS
 
     # Database
     DATABASE_URL: str = "postgresql+asyncpg://codepilot:codepilot@localhost:5432/codepilot"
@@ -60,27 +68,21 @@ class Settings(BaseSettings):
     AGENT_MAX_ITERATIONS: int = 10
     AGENT_TIMEOUT_SECONDS: int = 300
 
-    @model_validator(mode="before")
+    @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
-    def parse_allowed_origins(cls, values: Any) -> Any:
-        """Pre-process ALLOWED_ORIGINS before pydantic-settings attempts JSON parsing.
-        Handles: JSON array strings, comma-separated strings, empty strings, and None.
-        """
-        if isinstance(values, dict):
-            raw = values.get("ALLOWED_ORIGINS")
-            if isinstance(raw, str):
-                v_str = raw.strip()
-                if not v_str:
-                    # Empty string → use the field default
-                    values.pop("ALLOWED_ORIGINS", None)
-                elif v_str.startswith("[") and v_str.endswith("]"):
-                    try:
-                        values["ALLOWED_ORIGINS"] = json.loads(v_str)
-                    except Exception:
-                        values["ALLOWED_ORIGINS"] = [o.strip() for o in v_str.split(",") if o.strip()]
-                else:
-                    values["ALLOWED_ORIGINS"] = [o.strip() for o in v_str.split(",") if o.strip()]
-        return values
+    def parse_allowed_origins(cls, v: Any) -> Any:
+        """Parse ALLOWED_ORIGINS from JSON array or comma-separated string."""
+        if isinstance(v, str):
+            v_str = v.strip()
+            if not v_str:
+                return _DEFAULT_ORIGINS
+            if v_str.startswith("[") and v_str.endswith("]"):
+                try:
+                    return json.loads(v_str)
+                except Exception:
+                    pass
+            return [o.strip() for o in v_str.split(",") if o.strip()]
+        return v
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -98,9 +100,11 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
-        extra="ignore"
+        extra="ignore",
+        # Treat empty-string env vars as if they weren't set, using the field default instead.
+        # This prevents json.loads('') crashing for list[str] fields like ALLOWED_ORIGINS.
+        env_ignore_empty=True,
     )
 
 
 settings = Settings()
-
