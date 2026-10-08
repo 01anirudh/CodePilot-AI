@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from pydantic import field_validator
-from typing import Optional
+from pydantic import field_validator, model_validator
+from typing import Optional, Any
 import json
 
 
@@ -60,18 +60,27 @@ class Settings(BaseSettings):
     AGENT_MAX_ITERATIONS: int = 10
     AGENT_TIMEOUT_SECONDS: int = 300
 
-    @field_validator("ALLOWED_ORIGINS", mode="before")
+    @model_validator(mode="before")
     @classmethod
-    def parse_allowed_origins(cls, v):
-        if isinstance(v, str):
-            v_str = v.strip()
-            if v_str.startswith("[") and v_str.endswith("]"):
-                try:
-                    return json.loads(v_str)
-                except Exception:
-                    pass
-            return [origin.strip() for origin in v_str.split(",") if origin.strip()]
-        return v
+    def parse_allowed_origins(cls, values: Any) -> Any:
+        """Pre-process ALLOWED_ORIGINS before pydantic-settings attempts JSON parsing.
+        Handles: JSON array strings, comma-separated strings, empty strings, and None.
+        """
+        if isinstance(values, dict):
+            raw = values.get("ALLOWED_ORIGINS")
+            if isinstance(raw, str):
+                v_str = raw.strip()
+                if not v_str:
+                    # Empty string → use the field default
+                    values.pop("ALLOWED_ORIGINS", None)
+                elif v_str.startswith("[") and v_str.endswith("]"):
+                    try:
+                        values["ALLOWED_ORIGINS"] = json.loads(v_str)
+                    except Exception:
+                        values["ALLOWED_ORIGINS"] = [o.strip() for o in v_str.split(",") if o.strip()]
+                else:
+                    values["ALLOWED_ORIGINS"] = [o.strip() for o in v_str.split(",") if o.strip()]
+        return values
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
